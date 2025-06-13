@@ -8,69 +8,12 @@ from scipy.ndimage import rotate
 from soldet.SolitonDetector import SolitonDetector
 
 class VortexDetector(SolitonDetector):
-    def __init__(self):
+    def __init__(self, augment = False):
         super().__init__(process_fn = vortex_process_fn,
                          od_model = ObjectDetector2D,
                          od_dataset_fn = VortexODDataset,
                          od_loss_fn = MetzLoss2D,
-                         augment = False)
-        
-class object_cell(torch.nn.Module):
-    """ Object cell for use in 2D Object Detector.
-        This cell represents the base layer of the 2D Object Detector used in identifying the probability of a vortex
-        being present and its position.
-
-        Parameters
-        ----------
-        in_channels: int
-            The number of input channels in the image.
-        out_channels: int
-            The number of output channels in the image.
-        kernel: tuple
-            The 2D kernel size to use of shape (kH, kW)
-        pool: list
-            The size of the kernel to use during Max Pooling of the data.
-            (default = None)
-        dropout: float
-            How often neurons should drop out.
-            (default = 0.1)
-    """
-    def __init__(self, in_channels: int, out_channels: int, kernel: tuple, pool: list = None, dropout: float = 0.1):
-        super().__init__()
-        
-        ##Network Layers
-        self.conv_lay1 = torch.nn.Conv2d(in_channels, out_channels, kernel, padding='same', groups=in_channels)
-        self.conv_lay2 = torch.nn.Conv2d(out_channels, out_channels, kernel, padding='same', groups=in_channels)
-        self.conv_lay_act1 = torch.nn.PReLU()
-        self.conv_lay_act2 = torch.nn.PReLU()
-        self.bypass_conv = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding='same', groups=1)
-
-        ##Functional Layers
-        self.dropout = torch.nn.Dropout(dropout)
-        if pool is not None:
-            self.pool = torch.nn.MaxPool2d(pool)
-        else:
-            self.pool = None
-        self.norm = torch.nn.BatchNorm2d(out_channels)
-        
-        ##Weight Init
-        torch.nn.init.kaiming_normal_(self.conv_lay1.weight)
-        torch.nn.init.kaiming_normal_(self.conv_lay2.weight)
-    
-    def forward(self, x):
-        bypass = x
-        
-        x = self.conv_lay_act1(self.conv_lay1(x))
-        x = self.conv_lay_act2(self.conv_lay2(x))
-        x = self.norm(x)
-        x = self.dropout(x)
-
-        if self.pool == None:
-            x = x + self.bypass_conv(bypass)
-        else:
-            x = self.pool(x) + self.pool(self.bypass_conv(bypass))
-        
-        return x
+                         augment = augment)
 
 class ObjectDetector2D(torch.nn.Module):
     """ 2D "Vortex" Object Detector
@@ -143,7 +86,64 @@ class ObjectDetector2D(torch.nn.Module):
         x = self.output_act(self.output(x))
 
         return x
+
+class object_cell(torch.nn.Module):
+    """ Object cell for use in 2D Object Detector.
+        This cell represents the base layer of the 2D Object Detector used in identifying the probability of a vortex
+        being present and its position.
+
+        Parameters
+        ----------
+        in_channels: int
+            The number of input channels in the image.
+        out_channels: int
+            The number of output channels in the image.
+        kernel: tuple
+            The 2D kernel size to use of shape (kH, kW)
+        pool: list
+            The size of the kernel to use during Max Pooling of the data.
+            (default = None)
+        dropout: float
+            How often neurons should drop out.
+            (default = 0.1)
+    """
+    def __init__(self, in_channels: int, out_channels: int, kernel: tuple, pool: list = None, dropout: float = 0.1):
+        super().__init__()
+        
+        ##Network Layers
+        self.conv_lay1 = torch.nn.Conv2d(in_channels, out_channels, kernel, padding='same', groups=in_channels)
+        self.conv_lay2 = torch.nn.Conv2d(out_channels, out_channels, kernel, padding='same', groups=in_channels)
+        self.conv_lay_act1 = torch.nn.PReLU()
+        self.conv_lay_act2 = torch.nn.PReLU()
+        self.bypass_conv = torch.nn.Conv2d(in_channels, out_channels, (1, 1), padding='same', groups=1)
+
+        ##Functional Layers
+        self.dropout = torch.nn.Dropout(dropout)
+        if pool is not None:
+            self.pool = torch.nn.MaxPool2d(pool)
+        else:
+            self.pool = None
+        self.norm = torch.nn.BatchNorm2d(out_channels)
+        
+        ##Weight Init
+        torch.nn.init.kaiming_normal_(self.conv_lay1.weight)
+        torch.nn.init.kaiming_normal_(self.conv_lay2.weight)
     
+    def forward(self, x):
+        bypass = x
+        
+        x = self.conv_lay_act1(self.conv_lay1(x))
+        x = self.conv_lay_act2(self.conv_lay2(x))
+        x = self.norm(x)
+        x = self.dropout(x)
+
+        if self.pool == None:
+            x = x + self.bypass_conv(bypass)
+        else:
+            x = self.pool(x) + self.pool(self.bypass_conv(bypass))
+        
+        return x
+
 class MetzLoss2D(torch.nn.Module):
     '''
     Implementation of the loss function defined in: https://arxiv.org/abs/2012.13097
@@ -196,7 +196,7 @@ class VortexODDataset(torch.utils.data.Dataset):
     dims : tuple
         The shape of the image data.
     '''
-    def __init__(self, data: dict, transform_expand: bool = False, threshold: list = [0.5, np.sqrt(4**2 + 4**2)], 
+    def __init__(self, data: dict, augment: bool = False, threshold: list = [0.5, np.sqrt(4**2 + 4**2)], 
                  dims: tuple = (132, 132)):
         self.threshold = threshold
         self.dims = dims
@@ -213,7 +213,7 @@ class VortexODDataset(torch.utils.data.Dataset):
             else:
                 label_data.append([])
 
-            if transform_expand:
+            if augment:
                 #Rotation
                 angle = np.random.rand()*2*np.pi
                 R = np.array([[np.cos(angle), np.sin(angle)], [-np.sin(angle), np.cos(angle)]])
