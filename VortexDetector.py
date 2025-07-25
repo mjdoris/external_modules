@@ -8,85 +8,14 @@ from scipy.ndimage import rotate
 from soldet.SolitonDetector import SolitonDetector
 
 class VortexDetector(SolitonDetector):
-    def __init__(self, augment = False):
+    def __init__(self, **kwargs):
         super().__init__(process_fn = vortex_process_fn,
                          od_model = ObjectDetector2D,
                          od_dataset_fn = VortexODDataset,
                          od_loss_fn = MetzLoss2D,
-                         augment = augment)
-
-class ObjectDetector2D(torch.nn.Module):
-    """ 2D "Vortex" Object Detector
-        This pytorch object detector model identifies the position of excitations in two dimensions.
-        Based on the work done in https://arxiv.org/abs/2012.13097.
-
-        Parameters
-        ----------
-        layers : int
-            The number of layers to use in the model. Each layer creates an object_cell with corresponding parameters. 
-            (default = 4)
-        in_channels : list
-            A list of input channels to the 2D convolutions for each layer. 
-            (default = [1, 16, 32, 64])
-        out_channels : list
-            A list of output channels to the 2D convolutions for each layer.
-            (default = [16, 32, 64, 128])
-        pool : list
-            A list of pooling kernel sizes for each layer.
-            (default = [(2,2), None, (2,2), None])
-        kernel : tuple
-            The 2D kernel size to use of shape (kH, kW) for each layer.
-            (default = (4, 4))
-        label_shape : tuple
-            The size of the position labels after converting from real positions to the compressed cell representation.
-            For 2D this shape is typically (height // 4, width // 4), where 4 is the number of pixels for each cell in 
-            the array.
-            (default = (33, 33))
-        dropout : float
-            How often neurons should drop out. 
-            (default = 0.1)
-    """
-    def __init__(self, dropout = 0.1, layers = 4, in_channels = [1, 16, 32, 64], out_channels = [16, 32, 64, 128],
-                 pool = [(2,2), None, (2,2), None], kernel = (4, 4), label_shape = (33, 33)):
-        super().__init__()
-
-        self.layers = torch.nn.ModuleList()
-        for idx in range(layers):
-            self.layers.append(object_cell(in_channels = in_channels[idx], out_channels = out_channels[idx], kernel = kernel, pool = pool[idx], dropout = dropout))
-
-        ##Output Layers
-        self.pool = torch.nn.AdaptiveMaxPool2d(label_shape)
-        self.output = torch.nn.Conv2d(in_channels = out_channels[-1], out_channels = 3, kernel_size = (1,1), padding='same')
-        self.output_act = torch.nn.Sigmoid()
-        torch.nn.init.xavier_uniform_(self.output.weight)
-
-    def forward(self, x):
-        """ 
-        Take a tensor and identify any vortices and their positions.
-
-        Parameters
-        ----------
-        x : tensor of shape (B, 1, H, W)
-            The input tensor to make a prediction on. The expected shape is of shape (B, 1, H, W), where B is the batch
-            size, H is the image height, and W is the image width.
-
-        Returns
-        ----------
-        x : tensor of shape (B, 3, H // 4, W // 4)
-            The output tensor containing the probabilities for a vortex to be present in one of the cells and its 
-            fractional position within a cell. Here B is the batch size and dimension 1 contains the probability (0),
-            the vertical position in the cell (1), and the horizontal position within the cell (2). For the position 
-            values 0 to 1 indicate which side of the cell and by extension which pixel after conversion. 
-            Dimension 2 indicates the number of cells in the vertical direction and dimension 3 indicates the number of
-            cells in the horizontal direction. 
-        """
-        for layer in self.layers:
-            x = layer(x)
-        x = self.pool(x)
-        x = self.output_act(self.output(x))
-
-        return x
-
+                         augment = False,
+                         **kwargs)
+        
 class object_cell(torch.nn.Module):
     """ Object cell for use in 2D Object Detector.
         This cell represents the base layer of the 2D Object Detector used in identifying the probability of a vortex
@@ -144,6 +73,78 @@ class object_cell(torch.nn.Module):
         
         return x
 
+class ObjectDetector2D(torch.nn.Module):
+    """ 2D "Vortex" Object Detector
+        This pytorch object detector model identifies the position of excitations in two dimensions.
+        Based on the work done in https://arxiv.org/abs/2012.13097.
+
+        Parameters
+        ----------
+        layers : int
+            The number of layers to use in the model. Each layer creates an object_cell with corresponding parameters. 
+            (default = 4)
+        in_channels : list
+            A list of input channels to the 2D convolutions for each layer. 
+            (default = [1, 16, 32, 64])
+        out_channels : list
+            A list of output channels to the 2D convolutions for each layer.
+            (default = [16, 32, 64, 128])
+        pool : list
+            A list of pooling kernel sizes for each layer.
+            (default = [(2,2), None, (2,2), None])
+        kernel : tuple
+            The 2D kernel size to use of shape (kH, kW) for each layer.
+            (default = (4, 4))
+        label_shape : tuple
+            The size of the position labels after converting from real positions to the compressed cell representation.
+            For 2D this shape is typically (height // 4, width // 4), where 4 is the number of pixels for each cell in 
+            the array.
+            (default = (33, 33))
+        dropout : float
+            How often neurons should drop out. 
+            (default = 0.1)
+    """
+    def __init__(self, dropout = 0.1, layers = 4, in_channels = [1, 16, 32, 64], out_channels = [16, 32, 64, 128],
+                 pool = [None, (2,2), None, (2,2)], kernel = (7, 7), label_shape = (33, 33)):
+        super().__init__()
+
+        self.layers = torch.nn.ModuleList()
+        for idx in range(layers):
+            self.layers.append(object_cell(in_channels = in_channels[idx], out_channels = out_channels[idx], kernel = kernel, pool = pool[idx], dropout = dropout))
+
+        ##Output Layers
+        self.pool = torch.nn.AdaptiveMaxPool2d(label_shape)
+        self.output = torch.nn.Conv2d(in_channels = out_channels[-1], out_channels = 3, kernel_size = (1,1), padding='same')
+        self.output_act = torch.nn.Sigmoid()
+        torch.nn.init.xavier_uniform_(self.output.weight)
+
+    def forward(self, x):
+        """ 
+        Take a tensor and identify any vortices and their positions.
+
+        Parameters
+        ----------
+        x : tensor of shape (B, 1, H, W)
+            The input tensor to make a prediction on. The expected shape is of shape (B, 1, H, W), where B is the batch
+            size, H is the image height, and W is the image width.
+
+        Returns
+        ----------
+        x : tensor of shape (B, 3, H // 4, W // 4)
+            The output tensor containing the probabilities for a vortex to be present in one of the cells and its 
+            fractional position within a cell. Here B is the batch size and dimension 1 contains the probability (0),
+            the vertical position in the cell (1), and the horizontal position within the cell (2). For the position 
+            values 0 to 1 indicate which side of the cell and by extension which pixel after conversion. 
+            Dimension 2 indicates the number of cells in the vertical direction and dimension 3 indicates the number of
+            cells in the horizontal direction. 
+        """
+        for layer in self.layers:
+            x = layer(x)
+        x = self.pool(x)
+        x = self.output_act(self.output(x))
+
+        return x
+    
 class MetzLoss2D(torch.nn.Module):
     '''
     Implementation of the loss function defined in: https://arxiv.org/abs/2012.13097
@@ -196,7 +197,7 @@ class VortexODDataset(torch.utils.data.Dataset):
     dims : tuple
         The shape of the image data.
     '''
-    def __init__(self, data: dict, augment: bool = False, threshold: list = [0.5, np.sqrt(4**2 + 4**2)], 
+    def __init__(self, data: dict, augment: bool = False, threshold: list = [0.5, 8.18], 
                  dims: tuple = (132, 132)):
         self.threshold = threshold
         self.dims = dims
@@ -243,7 +244,7 @@ class VortexODDataset(torch.utils.data.Dataset):
         img_data = np.reshape(img_data,(img_data.shape[0], 1, img_data.shape[1], img_data.shape[2]))
             
         self.imgs = torch.from_numpy(img_data).float()
-        self.pos = torch.from_numpy(self.data_to_labels(label_data, self.threshold)).float()
+        self.pos = torch.from_numpy(self.data_to_labels(label_data)).float()
         self.og_labels = label_data
             
     def __len__(self):
@@ -277,7 +278,7 @@ class VortexODDataset(torch.utils.data.Dataset):
         
         return image, pos 
     
-    def labels_to_data(self, label_out: np.ndarray, threshold: list, xdim: int = 132, ydim: int = 132):
+    def labels_to_data(self, label_out: np.ndarray, xdim: int = 132, ydim: int = 132):
         '''
         Converts the labels in cell space to positions in pixel space.
 
@@ -306,9 +307,9 @@ class VortexODDataset(torch.utils.data.Dataset):
         if type(label_out) is not np.ndarray:
             raise ValueError('Invalid type. Label data should be provided as numpy array.')
         
-        return vortex_labels_func(label_out, threshold, xdim, ydim)
+        return vortex_labels_func(label_out, threshold=self.threshold, xdim=xdim, ydim=ydim)
     
-    def data_to_labels(self, label_in: list , threshold: list, xdim: int = 132, ydim: int = 132):
+    def data_to_labels(self, label_in: list, xdim: int = 132, ydim: int = 132):
         '''
         Converts the positions in pixel space to positions and probability in cell space.
 
@@ -337,10 +338,9 @@ class VortexODDataset(torch.utils.data.Dataset):
         if type(label_in) is not list:
             raise ValueError('Invalid type. Label data should be provided as a list.')
         
-        return vortex_labels_func(label_in, threshold, xdim, ydim)
+        return vortex_labels_func(label_in, threshold=self.threshold, xdim=xdim, ydim=ydim)
     
-def vortex_labels_func(label_in: list | np.ndarray, threshold: list = [0.5, np.sqrt(4**2 + 4**2)], xdim: int = 132, 
-                       ydim: int = 132):
+def vortex_labels_func(label_in: list | np.ndarray, threshold: list, xdim: int = 132, ydim: int = 132):
     '''
     Convert between vortex positions in pixel space and cell space. This new space is a compressed representation of
     the positions in pixel space and the probability of them being present in a cell. The new space is a (3, 33, 33)
